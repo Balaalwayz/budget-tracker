@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f1ede2;
+    --paper-2:#e9e3d3;
+    --ink:#20302a;
+    --ink-soft:#4c5c53;
+    --ledger:#2f4a3c;
+    --ledger-2:#243a2f;
+    --gold:#a9824c;
+    --gold-soft:#cbb384;
+    --gold-tint:#f0e6d2;
+    --rust:#b54834;
+    --rust-soft:#e7c9c0;
+    --line:#c9c0a8;
+    --green-tint:#e4e9dd;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{
+    max-width:980px;
+    margin:0 auto;
+    padding:28px 20px 80px;
+  }
+
+  /* ---- Perforated header / passbook cover ---- */
+  .cover{
+    background:linear-gradient(180deg,var(--ledger) 0%,var(--ledger-2) 100%);
+    border-radius:4px 4px 14px 14px;
+    color:#f1ede2;
+    padding:30px 34px 24px;
+    position:relative;
+    box-shadow:0 14px 30px -18px rgba(32,48,42,0.55);
+  }
+  .perf{
+    position:absolute; left:0; right:0; bottom:-9px;
+    height:18px;
+    background-image: radial-gradient(circle, var(--paper) 5px, transparent 5.5px);
+    background-size:22px 18px;
+    background-position: 11px 0;
+  }
+  .cover-top{
+    display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;
+  }
+  .brand{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--gold-soft);
+  }
+  .cover h1{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:30px;
+    margin:6px 0 0;
+    letter-spacing:.01em;
+  }
+  .cover-controls{
+    display:flex; flex-direction:column; align-items:flex-end; gap:10px;
+  }
+  .month-picker{
+    display:flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+  }
+  .month-picker button{
+    background:rgba(241,237,226,0.1);
+    border:1px solid rgba(241,237,226,0.25);
+    color:#f1ede2;
+    width:26px;height:26px;border-radius:50%;
+    cursor:pointer; font-size:14px; line-height:1;
+  }
+  .month-picker button:hover{background:rgba(241,237,226,0.2);}
+  .month-label{min-width:120px;text-align:center;}
+
+  .home-currency{
+    display:flex; align-items:center; gap:7px;
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px;
+    color:rgba(241,237,226,0.7); letter-spacing:.06em; text-transform:uppercase;
+  }
+  .home-currency select{
+    background:rgba(241,237,226,0.1);
+    border:1px solid rgba(241,237,226,0.3);
+    color:#f1ede2;
+    font-family:'IBM Plex Mono',monospace; font-size:12px;
+    border-radius:5px; padding:4px 6px;
+  }
+  .home-currency select option{color:#20302a;}
+
+  .balance-row{
+    display:flex; gap:36px; margin-top:22px; flex-wrap:wrap;
+  }
+  .balance-main .label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--gold-soft);
+  }
+  .balance-main .amount{
+    font-family:'Fraunces',serif;
+    font-size:46px; font-weight:600; line-height:1.1;
+    margin-top:4px;
+    font-variant-numeric:tabular-nums;
+  }
+  .mini-stats{display:flex; gap:28px; align-items:flex-end;}
+  .mini-stat .label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:rgba(241,237,226,0.65);
+  }
+  .mini-stat .val{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:19px; margin-top:3px; font-variant-numeric:tabular-nums;
+  }
+  .mini-stat.income .val{color:#bcd9a8;}
+  .mini-stat.expense .val{color:#e3a58f;}
+  .fx-note{
+    font-family:'IBM Plex Mono',monospace; font-size:10px; color:rgba(241,237,226,0.5);
+    margin-top:10px;
+  }
+
+  /* ---- Sections ---- */
+  section{margin-top:34px;}
+  .section-head{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:14px;
+  }
+  .section-head h2{
+    font-family:'Fraunces',serif; font-weight:600; font-size:19px; margin:0;
+  }
+  .section-head .hint{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);
+  }
+
+  /* ---- Accounts ---- */
+  .accounts{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+    gap:12px;
+  }
+  .account-card{
+    background:var(--paper-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:14px 14px 12px;
+    position:relative;
+  }
+  .account-card .acc-name{
+    font-family:'Fraunces',serif; font-weight:600; font-size:15px;
+  }
+  .account-card .acc-cur{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--ink-soft);
+    letter-spacing:.06em; text-transform:uppercase; margin-top:2px;
+  }
+  .account-card .acc-bal{
+    font-family:'IBM Plex Mono',monospace; font-size:19px; margin-top:10px;
+    font-variant-numeric:tabular-nums;
+  }
+  .account-card .acc-del{
+    position:absolute; top:10px; right:10px;
+    background:none; border:none; color:var(--ink-soft); cursor:pointer;
+    font-size:13px; opacity:.5;
+  }
+  .account-card .acc-del:hover{opacity:1; color:var(--rust);}
+  .add-account{
+    background:var(--paper-2);
+    border:1px dashed var(--gold-soft);
+    border-radius:8px;
+    padding:14px;
+    display:flex; gap:10px; align-items:end; flex-wrap:wrap;
+  }
+  .add-account .field{flex:1 1 140px;}
+  .add-account .field.narrow{flex:0 1 100px;}
+
+  /* ---- Budgets grid ---- */
+  .budgets{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+    gap:12px;
+  }
+  .budget-card{
+    background:var(--paper-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:14px 14px 12px;
+  }
+  .budget-card .top{
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px;
+  }
+  .budget-card .cat{font-weight:600; letter-spacing:.02em;}
+  .budget-card .cap{
+    color:var(--ink-soft); cursor:pointer; border:none; background:none;
+    font-family:'IBM Plex Mono',monospace; font-size:11px; text-decoration:underline dotted;
+  }
+  .gauge{
+    margin-top:10px; height:7px; border-radius:4px; background:#d9d2bd; overflow:hidden;
+  }
+  .gauge-fill{height:100%; border-radius:4px; background:var(--ledger); transition:width .4s ease;}
+  .gauge-fill.over{background:var(--rust);}
+  .budget-card .nums{
+    display:flex; justify-content:space-between; margin-top:8px;
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ink-soft);
+  }
+  .budget-card .nums b{color:var(--ink); font-weight:600;}
+
+  /* ---- Entry form (deposit slip) ---- */
+  .slip{
+    background:var(--paper-2);
+    border:1px dashed var(--gold-soft);
+    border-radius:8px;
+    padding:18px 20px;
+  }
+  .slip-grid{
+    display:flex; flex-wrap:wrap; gap:12px; align-items:end;
+  }
+  .field{flex:1 1 130px; min-width:110px;}
+  .field.wide{flex:1.6 1 200px;}
+  .field.narrow{flex:0 1 100px;}
+  .field label{
+    display:block; font-family:'IBM Plex Mono',monospace; font-size:10.5px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:5px;
+  }
+  .field input, .field select{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px;
+    background:#fbfaf5; font-family:'Inter',sans-serif; font-size:13.5px; color:var(--ink);
+  }
+  .field input:focus, .field select:focus{outline:2px solid var(--gold); outline-offset:1px;}
+  .toggle-type{
+    display:flex; border:1px solid var(--line); border-radius:6px; overflow:hidden;
+  }
+  .toggle-type button{
+    flex:1; border:none; padding:9px 0; background:#fbfaf5; cursor:pointer;
+    font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-soft);
+  }
+  .toggle-type button.active-expense{background:var(--rust); color:#fff;}
+  .toggle-type button.active-income{background:var(--ledger); color:#fff;}
+  .add-btn{
+    background:var(--ink); color:#f1ede2; border:none; border-radius:6px;
+    padding:10px 18px; font-family:'IBM Plex Mono',monospace; font-size:12.5px;
+    letter-spacing:.04em; cursor:pointer; white-space:nowrap;
+  }
+  .add-btn:hover{background:var(--ledger-2);}
+  .add-btn:disabled{opacity:.5; cursor:not-allowed;}
+  .fx-row{
+    margin-top:12px; padding-top:12px; border-top:1px solid var(--line);
+    display:none; gap:12px; align-items:end; flex-wrap:wrap;
+  }
+  .fx-row.show{display:flex;}
+  .fx-row .fx-hint{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);
+    flex:1 1 220px; align-self:center;
+  }
+  .fx-row .fx-hint b{color:var(--ink);}
+  .fx-refresh{
+    background:none; border:1px solid var(--line); border-radius:6px;
+    width:32px; height:32px; cursor:pointer; font-size:14px; color:var(--ink-soft);
+    flex:0 0 auto;
+  }
+  .fx-refresh:hover{color:var(--ink); border-color:var(--gold);}
+  .fx-refresh.spinning{animation:spin .8s linear infinite;}
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .fx-status{
+    font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--ink-soft);
+    flex-basis:100%;
+  }
+  .fx-status.err{color:var(--rust);}
+  .no-accounts-note{
+    font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-soft);
+    padding:6px 2px 0;
+  }
+
+  /* ---- Register (transaction table) ---- */
+  .register{
+    border-top:2px solid var(--ink);
+  }
+  .reg-row{
+    display:grid;
+    grid-template-columns: 84px 1fr 130px 120px 26px;
+    gap:10px; align-items:center;
+    padding:11px 4px;
+    border-bottom:1px solid var(--line);
+    font-size:13.5px;
+    animation: rowIn .3s ease;
+  }
+  @keyframes rowIn{ from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:translateY(0);} }
+  .reg-row.head{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-soft); border-bottom:1px solid var(--ink);
+  }
+  .reg-row .date{font-family:'IBM Plex Mono',monospace; color:var(--ink-soft); font-size:12px;}
+  .reg-row .desc{font-weight:500; display:block;}
+  .reg-row .tags{display:flex; gap:6px; margin-top:5px; flex-wrap:wrap;}
+  .reg-row .tag{
+    font-family:'IBM Plex Mono',monospace; font-size:10px;
+    padding:3px 8px; border-radius:100px; width:fit-content;
+  }
+  .reg-row .tag.category{background:var(--green-tint); color:var(--ledger-2);}
+  .reg-row .tag.account{background:var(--gold-tint); color:#7a5a26;}
+  .reg-row .amt{
+    font-family:'IBM Plex Mono',monospace; text-align:right; font-variant-numeric:tabular-nums;
+  }
+  .reg-row .amt .conv{
+    display:block; font-size:10.5px; color:var(--ink-soft); font-weight:400;
+  }
+  .reg-row .amt.expense{color:var(--rust);}
+  .reg-row .amt.income{color:var(--ledger);}
+  .reg-row .bal{
+    font-family:'IBM Plex Mono',monospace; text-align:right; color:var(--ink-soft); font-variant-numeric:tabular-nums;
+  }
+  .reg-row .del{
+    background:none; border:none; color:var(--ink-soft); cursor:pointer; font-size:15px;
+    opacity:.5;
+  }
+  .reg-row .del:hover{opacity:1; color:var(--rust);}
+  .empty{
+    padding:34px 10px; text-align:center; color:var(--ink-soft);
+    font-family:'IBM Plex Mono',monospace; font-size:12.5px;
+  }
+
+  footer{
+    margin-top:36px; text-align:center; font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; color:var(--ink-soft); letter-spacing:.06em;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .reg-row{animation:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="cover">
+    <div class="cover-top">
+      <div>
+        <div class="brand">Personal Ledger</div>
+        <h1 id="monthTitle">July 2026</h1>
+      </div>
+      <div class="cover-controls">
+        <div class="month-picker">
+          <button id="prevMonth" aria-label="Previous month">‹</button>
+          <span class="month-label" id="monthLabel">Jul 2026</span>
+          <button id="nextMonth" aria-label="Next month">›</button>
+        </div>
+        <div class="home-currency">
+          <span>Home currency</span>
+          <select id="homeCurrencySelect"></select>
+        </div>
+      </div>
+    </div>
+    <div class="balance-row">
+      <div class="balance-main">
+        <div class="label">Balance this month</div>
+        <div class="amount" id="netAmount">$0.00</div>
+      </div>
+      <div class="mini-stats">
+        <div class="mini-stat income">
+          <div class="label">In</div>
+          <div class="val" id="incomeAmount">$0.00</div>
+        </div>
+        <div class="mini-stat expense">
+          <div class="label">Out</div>
+          <div class="val" id="expenseAmount">$0.00</div>
+        </div>
+      </div>
+    </div>
+    <div class="fx-note">Totals and budgets are shown in your home currency. Transactions belong to an account, and each account has its own currency.</div>
+    <div class="perf"></div>
+  </div>
+
+  <section>
+    <div class="section-head">
+      <h2>Accounts</h2>
+      <span class="hint">balances shown in each account's own currency</span>
+    </div>
+    <div class="accounts" id="accountsGrid"></div>
+    <div class="add-account" style="margin-top:12px;">
+      <div class="field">
+        <label for="accNameInput">New account name</label>
+        <input id="accNameInput" type="text" placeholder="Checking, Travel card, Cash…">
+      </div>
+      <div class="field narrow">
+        <label for="accCurrencyInput">Currency</label>
+        <select id="accCurrencyInput"></select>
+      </div>
+      <button class="add-btn" id="addAccountBtn">Add account</button>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Category budgets</h2>
+      <span class="hint">click a limit to edit</span>
+    </div>
+    <div class="budgets" id="budgetsGrid"></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>New entry</h2>
+    </div>
+    <div class="slip">
+      <div class="slip-grid">
+        <div class="field wide">
+          <label for="descInput">Description</label>
+          <input id="descInput" type="text" placeholder="Coffee, paycheck, rent…">
+        </div>
+        <div class="field narrow">
+          <label for="amountInput">Amount</label>
+          <input id="amountInput" type="number" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label for="accountInput">Account</label>
+          <select id="accountInput"></select>
+        </div>
+        <div class="field">
+          <label for="categoryInput">Category</label>
+          <select id="categoryInput"></select>
+        </div>
+        <div class="field">
+          <label for="dateInput">Date</label>
+          <input id="dateInput" type="date">
+        </div>
+        <div class="field" style="min-width:150px;">
+          <label>Type</label>
+          <div class="toggle-type">
+            <button type="button" id="typeExpense" class="active-expense">Expense</button>
+            <button type="button" id="typeIncome">Income</button>
+          </div>
+        </div>
+        <div class="field narrow" style="flex:0 0 auto; align-self:end;">
+          <label>&nbsp;</label>
+          <button class="add-btn" id="addBtn">Add to ledger</button>
+        </div>
+      </div>
+      <div class="no-accounts-note" id="noAccountsNote" style="display:none;">Add an account above before recording your first entry.</div>
+      <div class="fx-row" id="fxRow">
+        <div class="field narrow">
+          <label for="rateInput">Rate to <span id="rateHomeCode">USD</span></label>
+          <input id="rateInput" type="number" min="0" step="0.000001" value="1">
+        </div>
+        <button type="button" class="fx-refresh" id="fxRefreshBtn" title="Refresh live rate" aria-label="Refresh live rate">⟳</button>
+        <div class="fx-hint" id="fxHint">1 <span id="fxFromCode">EUR</span> = <b><span id="rateInputEcho">1.0000</span> <span id="rateHomeCode2">USD</span></b> — converted amount: <b id="convertedPreview">$0.00</b></div>
+        <div class="fx-status" id="fxStatus">fetching live rate…</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Register</h2>
+      <span class="hint" id="countHint"></span>
+    </div>
+    <div class="register" id="registerTable"></div>
+  </section>
+
+  <footer>Entries are stored to your account for this app only</footer>
+</div>
+
+<script>
+(function(){
+  const CATEGORIES = ["Food","Transport","Housing","Utilities","Entertainment","Health","Shopping","Other"];
+  const CURRENCIES = [
+    {code:"USD", symbol:"$"},
+    {code:"EUR", symbol:"€"},
+    {code:"GBP", symbol:"£"},
+    {code:"JPY", symbol:"¥"},
+    {code:"CAD", symbol:"C$"},
+    {code:"AUD", symbol:"A$"},
+    {code:"CHF", symbol:"CHF "},
+    {code:"CNY", symbol:"¥"},
+    {code:"INR", symbol:"₹"},
+    {code:"BRL", symbol:"R$"},
+    {code:"MXN", symbol:"MX$"}
+  ];
+  const symbolFor = code => (CURRENCIES.find(c=>c.code===code)||{symbol:code+" "}).symbol;
+  const fmt = (n, code) => symbolFor(code) + (n<0?"-":"") + Math.abs(n).toFixed(2);
+  const todayISO = () => new Date().toISOString().slice(0,10);
+  const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+  let transactions = [];
+  let accounts = [];
+  let budgets = {};
+  let homeCurrency = "USD";
+  let txType = "expense";
+  let viewDate = new Date();
+  const rateCache = {}; // "FROM_TO" -> rate
+  let fxFetchToken = 0; // guards against out-of-order responses
+
+  async function fetchLiveRate(from, to){
+    if(from === to) return 1;
+    const key = from+"_"+to;
+    if(rateCache[key]) return rateCache[key];
+    const res = await fetch(`https://open.er-api.com/v6/latest/${from}`);
+    if(!res.ok) throw new Error("rate fetch failed");
+    const data = await res.json();
+    const rate = data && data.rates ? data.rates[to] : undefined;
+    if(!rate) throw new Error("currency not supported");
+    rateCache[key] = rate;
+    return rate;
+  }
+
+  const monthKey = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  const monthLabelLong = d => d.toLocaleString('en-US',{month:'long', year:'numeric'});
+  const monthLabelShort = d => d.toLocaleString('en-US',{month:'short', year:'numeric'});
+  const accountById = id => accounts.find(a=>a.id===id);
+
+  async function loadData(){
+    try{
+      const t = await window.storage.get('transactions', false);
+      transactions = t ? JSON.parse(t.value) : [];
+    }catch(e){ transactions = []; }
+    try{
+      const a = await window.storage.get('accounts', false);
+      accounts = a ? JSON.parse(a.value) : [];
+    }catch(e){ accounts = []; }
+    try{
+      const b = await window.storage.get('budgets', false);
+      budgets = b ? JSON.parse(b.value) : {};
+    }catch(e){ budgets = {}; }
+    try{
+      const c = await window.storage.get('homeCurrency', false);
+      homeCurrency = c ? JSON.parse(c.value) : "USD";
+    }catch(e){ homeCurrency = "USD"; }
+
+    // migrate legacy transactions that had a raw `currency` field instead of accountId
+    let migrated = false;
+    transactions.forEach(t=>{
+      if(!t.accountId && t.currency){
+        let acc = accounts.find(a=>a.currency===t.currency && a.name==="Legacy "+t.currency);
+        if(!acc){
+          acc = {id: uid(), name:"Legacy "+t.currency, currency:t.currency};
+          accounts.push(acc);
+          migrated = true;
+        }
+        t.accountId = acc.id;
+      }
+    });
+    if(migrated) saveAccounts();
+
+    document.getElementById('homeCurrencySelect').value = homeCurrency;
+    populateAccountSelect();
+    updateFxLabels();
+    render();
+  }
+
+  async function saveTransactions(){
+    try{ await window.storage.set('transactions', JSON.stringify(transactions), false); }
+    catch(e){ console.error('save tx failed', e); }
+  }
+  async function saveAccounts(){
+    try{ await window.storage.set('accounts', JSON.stringify(accounts), false); }
+    catch(e){ console.error('save accounts failed', e); }
+  }
+  async function saveBudgets(){
+    try{ await window.storage.set('budgets', JSON.stringify(budgets), false); }
+    catch(e){ console.error('save budgets failed', e); }
+  }
+  async function saveHomeCurrency(){
+    try{ await window.storage.set('homeCurrency', JSON.stringify(homeCurrency), false); }
+    catch(e){ console.error('save home currency failed', e); }
+  }
+
+  function populateStaticSelects(){
+    document.getElementById('categoryInput').innerHTML = CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
+    const curOpts = CURRENCIES.map(c=>`<option value="${c.code}">${c.code}</option>`).join('');
+    document.getElementById('accCurrencyInput').innerHTML = curOpts;
+    document.getElementById('homeCurrencySelect').innerHTML = curOpts;
+  }
+
+  function populateAccountSelect(){
+    const sel = document.getElementById('accountInput');
+    const prev = sel.value;
+    sel.innerHTML = accounts.map(a=>`<option value="${a.id}">${escapeHtml(a.name)} (${a.currency})</option>`).join('');
+    if(accounts.some(a=>a.id===prev)) sel.value = prev;
+
+    const hasAccounts = accounts.length>0;
+    document.getElementById('addBtn').disabled = !hasAccounts;
+    document.getElementById('noAccountsNote').style.display = hasAccounts ? 'none' : 'block';
+  }
+
+  function setType(t){
+    txType = t;
+    document.getElementById('typeExpense').classList.toggle('active-expense', t==='expense');
+    document.getElementById('typeIncome').classList.toggle('active-income', t==='income');
+  }
+
+  function currentMonthTx(){
+    const mk = monthKey(viewDate);
+    return transactions.filter(tx => tx.date.slice(0,7) === mk);
+  }
+
+  async function updateFxLabels(){
+    const accId = document.getElementById('accountInput').value;
+    const acc = accountById(accId);
+    const entryCode = acc ? acc.currency : homeCurrency;
+    const showFx = entryCode !== homeCurrency;
+    const fxRow = document.getElementById('fxRow');
+    fxRow.classList.toggle('show', showFx);
+    document.getElementById('rateHomeCode').textContent = homeCurrency;
+    document.getElementById('rateHomeCode2').textContent = homeCurrency;
+    document.getElementById('fxFromCode').textContent = entryCode;
+    updateConvertedPreview();
+
+    if(!showFx) return;
+
+    const status = document.getElementById('fxStatus');
+    const rateInput = document.getElementById('rateInput');
+    const refreshBtn = document.getElementById('fxRefreshBtn');
+    const token = ++fxFetchToken;
+    status.textContent = "fetching live rate…";
+    status.classList.remove('err');
+    refreshBtn.classList.add('spinning');
+    try{
+      const rate = await fetchLiveRate(entryCode, homeCurrency);
+      if(token !== fxFetchToken) return; // a newer request superseded this one
+      rateInput.value = rate;
+      status.textContent = `live rate as of today — you can adjust it above if needed`;
+      updateConvertedPreview();
+    }catch(err){
+      if(token !== fxFetchToken) return;
+      status.textContent = `couldn't fetch a live rate for ${entryCode}→${homeCurrency} — enter it manually`;
+      status.classList.add('err');
+    }finally{
+      if(token === fxFetchToken) refreshBtn.classList.remove('spinning');
+    }
+  }
+
+  function updateConvertedPreview(){
+    const rate = parseFloat(document.getElementById('rateInput').value) || 0;
+    const amount = parseFloat(document.getElementById('amountInput').value) || 0;
+    document.getElementById('rateInputEcho').textContent = rate.toFixed(6);
+    document.getElementById('convertedPreview').textContent = fmt(amount*rate, homeCurrency);
+  }
+
+  function refreshRateManually(){
+    const accId = document.getElementById('accountInput').value;
+    const acc = accountById(accId);
+    const entryCode = acc ? acc.currency : homeCurrency;
+    delete rateCache[entryCode+"_"+homeCurrency];
+    updateFxLabels();
+  }
+
+  function render(){
+    document.getElementById('monthTitle').textContent = monthLabelLong(viewDate);
+    document.getElementById('monthLabel').textContent = monthLabelShort(viewDate);
+
+    const monthTx = currentMonthTx();
+    const income = monthTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.homeAmount,0);
+    const expense = monthTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.homeAmount,0);
+    document.getElementById('incomeAmount').textContent = fmt(income, homeCurrency);
+    document.getElementById('expenseAmount').textContent = fmt(expense, homeCurrency);
+    document.getElementById('netAmount').textContent = fmt(income-expense, homeCurrency);
+
+    renderAccounts();
+    renderBudgets(monthTx);
+    renderRegister(monthTx);
+  }
+
+  function renderAccounts(){
+    const grid = document.getElementById('accountsGrid');
+    if(accounts.length===0){
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">No accounts yet. Add your first one below.</div>`;
+      return;
+    }
+    grid.innerHTML = accounts.map(acc=>{
+      const bal = transactions.filter(t=>t.accountId===acc.id)
+        .reduce((s,t)=> s + (t.type==='income'? t.amount : -t.amount), 0);
+      return `
+        <div class="account-card">
+          <button class="acc-del" data-id="${acc.id}" aria-label="Delete account">✕</button>
+          <div class="acc-name">${escapeHtml(acc.name)}</div>
+          <div class="acc-cur">${acc.currency}</div>
+          <div class="acc-bal">${fmt(bal, acc.currency)}</div>
+        </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.acc-del').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.id;
+        const inUse = transactions.some(t=>t.accountId===id);
+        if(inUse){
+          alert("This account has transactions on it. Delete those entries first, then remove the account.");
+          return;
+        }
+        accounts = accounts.filter(a=>a.id!==id);
+        saveAccounts();
+        populateAccountSelect();
+        updateFxLabels();
+        render();
+      });
+    });
+  }
+
+  function renderBudgets(monthTx){
+    const grid = document.getElementById('budgetsGrid');
+    grid.innerHTML = CATEGORIES.map(cat=>{
+      const spent = monthTx.filter(t=>t.type==='expense' && t.category===cat).reduce((s,t)=>s+t.homeAmount,0);
+      const cap = budgets[cat] || 0;
+      const pct = cap>0 ? Math.min(100,(spent/cap)*100) : (spent>0?100:0);
+      const over = cap>0 && spent>cap;
+      return `
+        <div class="budget-card">
+          <div class="top">
+            <span class="cat">${cat}</span>
+            <button class="cap" data-cat="${cat}">${cap>0? 'limit '+fmt(cap, homeCurrency) : 'set limit'}</button>
+          </div>
+          <div class="gauge"><div class="gauge-fill ${over?'over':''}" style="width:${pct}%"></div></div>
+          <div class="nums"><span>spent <b>${fmt(spent, homeCurrency)}</b></span>${cap>0?`<span>${over?'over by '+fmt(spent-cap, homeCurrency):fmt(cap-spent, homeCurrency)+' left'}</span>`:''}</div>
+        </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.cap').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const cat = btn.dataset.cat;
+        const current = budgets[cat] || '';
+        const val = prompt(`Monthly limit for ${cat} (in ${homeCurrency}):`, current || '');
+        if(val === null) return;
+        const num = parseFloat(val);
+        if(!isNaN(num) && num>=0){
+          budgets[cat] = num;
+          saveBudgets();
+          render();
+        }
+      });
+    });
+  }
+
+  function renderRegister(monthTx){
+    const table = document.getElementById('registerTable');
+    document.getElementById('countHint').textContent = monthTx.length + (monthTx.length===1?' entry':' entries');
+
+    if(monthTx.length === 0){
+      table.innerHTML = `<div class="empty">No entries this month yet. Add one above to start the register.</div>`;
+      return;
+    }
+
+    const sortedAsc = [...monthTx].sort((a,b)=> a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    let running = 0;
+    const balances = {};
+    sortedAsc.forEach(t=>{
+      running += (t.type==='income'? t.homeAmount : -t.homeAmount);
+      balances[t.id] = running;
+    });
+
+    const sortedDesc = [...monthTx].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+
+    let html = `<div class="reg-row head">
+        <span>Date</span><span>Description</span><span style="text-align:right;">Amount</span><span style="text-align:right;">Balance</span><span></span>
+      </div>`;
+    html += sortedDesc.map(t=>{
+      const d = new Date(t.date+'T00:00:00');
+      const dLabel = d.toLocaleDateString('en-US',{month:'short', day:'numeric'});
+      const acc = accountById(t.accountId);
+      const accCurrency = acc ? acc.currency : homeCurrency;
+      const accName = acc ? acc.name : "(deleted account)";
+      const showConv = accCurrency !== homeCurrency;
+      return `<div class="reg-row" data-id="${t.id}">
+        <span class="date">${dLabel}</span>
+        <span>
+          <span class="desc">${escapeHtml(t.desc)}</span>
+          <span class="tags">
+            <span class="tag account">${escapeHtml(accName)}</span>
+            <span class="tag category">${t.category}</span>
+          </span>
+        </span>
+        <span class="amt ${t.type}">${t.type==='income'?'+':'-'}${fmt(t.amount, accCurrency)}${showConv?`<span class="conv">${t.type==='income'?'+':'-'}${fmt(t.homeAmount, homeCurrency)}</span>`:''}</span>
+        <span class="bal">${fmt(balances[t.id], homeCurrency)}</span>
+        <button class="del" data-id="${t.id}" aria-label="Delete entry">✕</button>
+      </div>`;
+    }).join('');
+    table.innerHTML = html;
+
+    table.querySelectorAll('.del').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        transactions = transactions.filter(t=>t.id !== btn.dataset.id);
+        saveTransactions();
+        renderAccounts();
+        render();
+      });
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function addAccount(){
+    const name = document.getElementById('accNameInput').value.trim();
+    const currency = document.getElementById('accCurrencyInput').value;
+    if(!name){ document.getElementById('accNameInput').focus(); return; }
+    accounts.push({id: uid(), name, currency});
+    saveAccounts();
+    document.getElementById('accNameInput').value = '';
+    populateAccountSelect();
+    updateFxLabels();
+    render();
+  }
+
+  function addEntry(){
+    if(accounts.length===0) return;
+    const desc = document.getElementById('descInput').value.trim();
+    const amount = parseFloat(document.getElementById('amountInput').value);
+    const category = document.getElementById('categoryInput').value;
+    const date = document.getElementById('dateInput').value || todayISO();
+    const accountId = document.getElementById('accountInput').value;
+    const acc = accountById(accountId);
+    const accCurrency = acc ? acc.currency : homeCurrency;
+    const rate = accCurrency === homeCurrency ? 1 : (parseFloat(document.getElementById('rateInput').value) || 0);
+
+    if(!desc){ document.getElementById('descInput').focus(); return; }
+    if(isNaN(amount) || amount<=0){ document.getElementById('amountInput').focus(); return; }
+    if(accCurrency !== homeCurrency && rate<=0){ document.getElementById('rateInput').focus(); return; }
+
+    transactions.push({
+      id: uid(),
+      desc, amount, accountId, rate, homeAmount: amount*rate,
+      category, date, type: txType
+    });
+    saveTransactions();
+
+    document.getElementById('descInput').value = '';
+    document.getElementById('amountInput').value = '';
+
+    viewDate = new Date(date+'T00:00:00');
+    render();
+  }
+
+  document.getElementById('addBtn').addEventListener('click', addEntry);
+  document.getElementById('addAccountBtn').addEventListener('click', addAccount);
+  document.getElementById('typeExpense').addEventListener('click', ()=>setType('expense'));
+  document.getElementById('typeIncome').addEventListener('click', ()=>setType('income'));
+  document.getElementById('prevMonth').addEventListener('click', ()=>{
+    viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth()-1, 1);
+    render();
+  });
+  document.getElementById('nextMonth').addEventListener('click', ()=>{
+    viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth()+1, 1);
+    render();
+  });
+  document.getElementById('accountInput').addEventListener('change', updateFxLabels);
+  document.getElementById('fxRefreshBtn').addEventListener('click', refreshRateManually);
+  document.getElementById('rateInput').addEventListener('input', updateConvertedPreview);
+  document.getElementById('amountInput').addEventListener('input', updateConvertedPreview);
+  document.getElementById('homeCurrencySelect').addEventListener('change', (e)=>{
+    homeCurrency = e.target.value;
+    saveHomeCurrency();
+    updateFxLabels();
+    render();
+  });
+  document.getElementById('amountInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
+  document.getElementById('descInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
+  document.getElementById('accNameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addAccount(); });
+
+  populateStaticSelects();
+  document.getElementById('dateInput').value = todayISO();
+  setType('expense');
+  loadData();
+})();
+</script>
+</body>
+</html>
