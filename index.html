@@ -5,6 +5,8 @@
 <title>Ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --paper:#f1ede2;
@@ -182,6 +184,29 @@
   }
   .add-account .field{flex:1 1 140px;}
   .add-account .field.narrow{flex:0 1 100px;}
+
+  .sync-box{
+    background:var(--paper-2);
+    border:1px dashed var(--gold-soft);
+    border-radius:8px;
+    padding:16px 18px;
+  }
+  .sync-row{display:flex; gap:10px; align-items:end; flex-wrap:wrap;}
+  .sync-row .field{flex:1 1 220px;}
+  .sync-note{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);
+    margin-top:10px; line-height:1.5;
+  }
+  .sync-status{
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ledger-2);
+    margin-top:10px;
+  }
+  .sync-status.err{color:var(--rust);}
+  .sync-connected-badge{
+    display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:10px;
+    background:var(--green-tint); color:var(--ledger-2); padding:3px 8px; border-radius:100px;
+    margin-left:8px; letter-spacing:.04em; text-transform:uppercase;
+  }
 
   /* ---- Budgets grid ---- */
   .budgets{
@@ -465,11 +490,43 @@
     <div class="register" id="registerTable"></div>
   </section>
 
+  <section>
+    <div class="section-head">
+      <h2>Cloud sync <span class="sync-connected-badge" id="syncBadge" style="display:none;">Connected</span></h2>
+      <span class="hint">optional — for using this on more than one device</span>
+    </div>
+    <div class="sync-box">
+      <div class="sync-row">
+        <div class="field">
+          <label for="syncCodeInput">Passphrase</label>
+          <input id="syncCodeInput" type="password" placeholder="Choose a private passphrase">
+        </div>
+        <button class="add-btn" id="syncConnectBtn">Connect</button>
+        <button class="add-btn" id="syncDisconnectBtn" style="display:none; background:var(--rust);">Disconnect</button>
+      </div>
+      <div class="sync-status" id="syncStatus"></div>
+      <div class="sync-note">Use the same passphrase on any device or browser to load this same data. Treat it like a shared password — anyone who has it can read and edit this ledger, so don't reuse a password you use elsewhere. This needs a Firebase project connected in the code (see setup notes) before it will work.</div>
+    </div>
+  </section>
+
   <footer>Entries are stored to your account for this app only</footer>
 </div>
 
 <script>
 (function(){
+  // ---- Cloud sync setup ----
+  // Create a free Firebase project at https://console.firebase.google.com,
+  // enable Firestore, register a Web app, and paste its config below.
+  // Full step-by-step instructions were given alongside this file.
+const firebaseConfig = {
+  apiKey: "AIzaSyDyWBz_esQnfbckuPg2Z0eYbc_NkG1g3og",
+  authDomain: "budget-tracker-c6b78.firebaseapp.com",
+  projectId: "budget-tracker-c6b78",
+  storageBucket: "budget-tracker-c6b78.firebasestorage.app",
+  messagingSenderId: "1040527446339",
+  appId: "1:1040527446339:web:940ab7ce6c9edea57c1ff6"
+};
+
   const CATEGORIES = ["Food","Transport","Housing","Utilities","Entertainment","Health","Shopping","Other"];
   const CURRENCIES = [
     {code:"USD", symbol:"$"},
@@ -488,6 +545,158 @@
   const fmt = (n, code) => symbolFor(code) + (n<0?"-":"") + Math.abs(n).toFixed(2);
   const todayISO = () => new Date().toISOString().slice(0,10);
   const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+  // Persistence layer: uses Claude's built-in storage when available (inside claude.ai),
+  // and falls back to the browser's localStorage when the file is opened directly
+  // (e.g. downloaded and double-clicked), so data is saved either way.
+  const hasClaudeStorage = typeof window.storage !== 'undefined' && window.storage
+    && typeof window.storage.get === 'function';
+  const LS_PREFIX = 'ledger:';
+
+  async function storageGet(key){
+    if(hasClaudeStorage){
+      try{ return await window.storage.get(key, false); }
+      catch(e){ return null; }
+    }
+    try{
+      const v = localStorage.getItem(LS_PREFIX+key);
+      return v !== null ? {value:v} : null;
+    }catch(e){ return null; }
+  }
+
+  async function storageSet(key, value){
+    if(hasClaudeStorage){
+      try{ await window.storage.set(key, value, false); return true; }
+      catch(e){ console.error('storage set failed', e); return false; }
+    }
+    try{ localStorage.setItem(LS_PREFIX+key, value); return true; }
+    catch(e){ console.error('localStorage set failed', e); return false; }
+  }
+
+  // ---- Cloud sync (Firestore) ----
+  let db = null;
+  let cloudEnabled = false;
+  let cloudDocId = null;
+  let unsubscribeSnapshot = null;
+  let lastPushedJSON = null;
+
+  function firebaseConfigured(){
+    return typeof firebase !== 'undefined' && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+  }
+
+  async function sha256Hex(text){
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  function initFirebase(){
+    if(db) return db;
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    return db;
+  }
+
+  function setSyncStatus(msg, isErr){
+    const el = document.getElementById('syncStatus');
+    if(!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('err', !!isErr);
+  }
+
+  function setSyncBadge(connected){
+    document.getElementById('syncBadge').style.display = connected ? 'inline-block' : 'none';
+    document.getElementById('syncConnectBtn').style.display = connected ? 'none' : 'inline-block';
+    document.getElementById('syncDisconnectBtn').style.display = connected ? 'inline-block' : 'none';
+    document.getElementById('syncCodeInput').disabled = connected;
+  }
+
+  function applyRemoteState(data){
+    transactions = data.transactions || [];
+    accounts = data.accounts || [];
+    budgets = data.budgets || {};
+    homeCurrency = data.homeCurrency || homeCurrency;
+    document.getElementById('homeCurrencySelect').value = homeCurrency;
+    populateAccountSelect();
+    updateFxLabels();
+    render();
+    storageSet('transactions', JSON.stringify(transactions));
+    storageSet('accounts', JSON.stringify(accounts));
+    storageSet('budgets', JSON.stringify(budgets));
+    storageSet('homeCurrency', JSON.stringify(homeCurrency));
+  }
+
+  function listenForRemoteChanges(){
+    if(unsubscribeSnapshot) unsubscribeSnapshot();
+    unsubscribeSnapshot = db.collection('ledgers').doc(cloudDocId).onSnapshot(snap=>{
+      if(!snap.exists) return;
+      const json = JSON.stringify(snap.data());
+      if(json === lastPushedJSON) return; // this is our own write echoing back
+      applyRemoteState(snap.data());
+      setSyncStatus("Updated just now from another device.");
+    }, err=>{
+      console.error(err);
+      setSyncStatus("Lost connection to the cloud — check your Firestore rules.", true);
+    });
+  }
+
+  async function pushToCloud(){
+    if(!cloudEnabled || !db || !cloudDocId) return;
+    const payload = { transactions, accounts, budgets, homeCurrency, updatedAt: Date.now() };
+    lastPushedJSON = JSON.stringify(payload);
+    try{ await db.collection('ledgers').doc(cloudDocId).set(payload); }
+    catch(e){ console.error('cloud push failed', e); setSyncStatus("Couldn't save to the cloud — check your connection.", true); }
+  }
+
+  async function connectCloudSync(code, isAutoReconnect){
+    if(!firebaseConfigured()){
+      setSyncStatus("Add your Firebase config in the code first — see the setup notes.", true);
+      return;
+    }
+    initFirebase();
+    setSyncStatus("Connecting…");
+    try{
+      const docId = isAutoReconnect ? code : await sha256Hex(code);
+      cloudDocId = docId;
+      cloudEnabled = true;
+      await storageSet('cloudDocId', docId);
+      const snap = await db.collection('ledgers').doc(docId).get();
+      if(snap.exists){
+        applyRemoteState(snap.data());
+        setSyncStatus("Connected — loaded your synced data.");
+      } else {
+        await pushToCloud();
+        setSyncStatus("Connected — this device is now synced to the cloud.");
+      }
+      listenForRemoteChanges();
+      setSyncBadge(true);
+    }catch(e){
+      console.error(e);
+      setSyncStatus("Couldn't connect. Check your Firebase config and Firestore rules.", true);
+      cloudEnabled = false;
+      setSyncBadge(false);
+    }
+  }
+
+  async function disconnectCloudSync(){
+    if(unsubscribeSnapshot) unsubscribeSnapshot();
+    cloudEnabled = false;
+    cloudDocId = null;
+    await storageSet('cloudDocId', '');
+    document.getElementById('syncCodeInput').value = '';
+    setSyncBadge(false);
+    setSyncStatus("Disconnected — this device is now local-only.");
+  }
+
+  async function autoReconnectCloudSync(){
+    if(!firebaseConfigured()) return;
+    try{
+      const saved = await storageGet('cloudDocId');
+      if(saved && saved.value){
+        await connectCloudSync(saved.value, true);
+      }
+    }catch(e){ /* silent — stays local-only */ }
+  }
 
   let transactions = [];
   let accounts = [];
@@ -518,19 +727,19 @@
 
   async function loadData(){
     try{
-      const t = await window.storage.get('transactions', false);
+      const t = await storageGet('transactions');
       transactions = t ? JSON.parse(t.value) : [];
     }catch(e){ transactions = []; }
     try{
-      const a = await window.storage.get('accounts', false);
+      const a = await storageGet('accounts');
       accounts = a ? JSON.parse(a.value) : [];
     }catch(e){ accounts = []; }
     try{
-      const b = await window.storage.get('budgets', false);
+      const b = await storageGet('budgets');
       budgets = b ? JSON.parse(b.value) : {};
     }catch(e){ budgets = {}; }
     try{
-      const c = await window.storage.get('homeCurrency', false);
+      const c = await storageGet('homeCurrency');
       homeCurrency = c ? JSON.parse(c.value) : "USD";
     }catch(e){ homeCurrency = "USD"; }
 
@@ -556,20 +765,20 @@
   }
 
   async function saveTransactions(){
-    try{ await window.storage.set('transactions', JSON.stringify(transactions), false); }
-    catch(e){ console.error('save tx failed', e); }
+    await storageSet('transactions', JSON.stringify(transactions));
+    pushToCloud();
   }
   async function saveAccounts(){
-    try{ await window.storage.set('accounts', JSON.stringify(accounts), false); }
-    catch(e){ console.error('save accounts failed', e); }
+    await storageSet('accounts', JSON.stringify(accounts));
+    pushToCloud();
   }
   async function saveBudgets(){
-    try{ await window.storage.set('budgets', JSON.stringify(budgets), false); }
-    catch(e){ console.error('save budgets failed', e); }
+    await storageSet('budgets', JSON.stringify(budgets));
+    pushToCloud();
   }
   async function saveHomeCurrency(){
-    try{ await window.storage.set('homeCurrency', JSON.stringify(homeCurrency), false); }
-    catch(e){ console.error('save home currency failed', e); }
+    await storageSet('homeCurrency', JSON.stringify(homeCurrency));
+    pushToCloud();
   }
 
   function populateStaticSelects(){
@@ -862,11 +1071,20 @@
   document.getElementById('amountInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
   document.getElementById('descInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
   document.getElementById('accNameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addAccount(); });
+  document.getElementById('syncConnectBtn').addEventListener('click', ()=>{
+    const code = document.getElementById('syncCodeInput').value.trim();
+    if(!code){ document.getElementById('syncCodeInput').focus(); return; }
+    connectCloudSync(code, false);
+  });
+  document.getElementById('syncDisconnectBtn').addEventListener('click', disconnectCloudSync);
+  document.getElementById('syncCodeInput').addEventListener('keydown', e=>{
+    if(e.key==='Enter') document.getElementById('syncConnectBtn').click();
+  });
 
   populateStaticSelects();
   document.getElementById('dateInput').value = todayISO();
   setType('expense');
-  loadData();
+  loadData().then(autoReconnectCloudSync);
 })();
 </script>
 </body>
