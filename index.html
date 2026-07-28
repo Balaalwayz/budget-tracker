@@ -6,6 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
@@ -207,6 +208,19 @@
     background:var(--green-tint); color:var(--ledger-2); padding:3px 8px; border-radius:100px;
     margin-left:8px; letter-spacing:.04em; text-transform:uppercase;
   }
+  .auth-link{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);
+    text-decoration:underline dotted; background:none; border:none; cursor:pointer;
+    padding:0; margin-top:8px; display:inline-block;
+  }
+  .auth-link:hover{color:var(--ink);}
+  .signed-in-row{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+  }
+  .signed-in-row .who{
+    font-family:'IBM Plex Mono',monospace; font-size:13px;
+  }
+  .signed-in-row .who b{color:var(--ledger-2);}
 
   /* ---- Budgets grid ---- */
   .budgets{
@@ -492,20 +506,38 @@
 
   <section>
     <div class="section-head">
-      <h2>Cloud sync <span class="sync-connected-badge" id="syncBadge" style="display:none;">Connected</span></h2>
-      <span class="hint">optional — for using this on more than one device</span>
+      <h2>Account <span class="sync-connected-badge" id="syncBadge" style="display:none;">Signed in</span></h2>
+      <span class="hint">sign in to sync this ledger across your devices</span>
     </div>
     <div class="sync-box">
-      <div class="sync-row">
-        <div class="field">
-          <label for="syncCodeInput">Passphrase</label>
-          <input id="syncCodeInput" type="password" placeholder="Choose a private passphrase">
+
+      <div id="authForm">
+        <div class="sync-row">
+          <div class="field">
+            <label for="authEmail">Email</label>
+            <input id="authEmail" type="email" placeholder="you@example.com" autocomplete="username">
+          </div>
+          <div class="field">
+            <label for="authPassword">Password</label>
+            <input id="authPassword" type="password" placeholder="At least 6 characters" autocomplete="current-password">
+          </div>
         </div>
-        <button class="add-btn" id="syncConnectBtn">Connect</button>
-        <button class="add-btn" id="syncDisconnectBtn" style="display:none; background:var(--rust);">Disconnect</button>
+        <div class="sync-row" style="margin-top:12px;">
+          <button class="add-btn" id="signInBtn">Sign in</button>
+          <button class="add-btn" id="signUpBtn" style="background:var(--ledger);">Create account</button>
+        </div>
+        <button type="button" class="auth-link" id="forgotPasswordLink">Forgot password?</button>
       </div>
+
+      <div id="signedInView" style="display:none;">
+        <div class="signed-in-row">
+          <div class="who">Signed in as <b id="signedInEmail"></b></div>
+          <button class="add-btn" id="signOutBtn" style="background:var(--rust);">Sign out</button>
+        </div>
+      </div>
+
       <div class="sync-status" id="syncStatus"></div>
-      <div class="sync-note">Use the same passphrase on any device or browser to load this same data. Treat it like a shared password — anyone who has it can read and edit this ledger, so don't reuse a password you use elsewhere. This needs a Firebase project connected in the code (see setup notes) before it will work.</div>
+      <div class="sync-note">Your ledger is tied to your account, so signing in with the same email and password on any device or browser loads the same data. This needs a Firebase project connected in the code, with email/password sign-in turned on (see setup notes), before it will work.</div>
     </div>
   </section>
 
@@ -573,10 +605,11 @@ const firebaseConfig = {
     catch(e){ console.error('localStorage set failed', e); return false; }
   }
 
-  // ---- Cloud sync (Firestore) ----
+  // ---- Cloud sync (Firebase Auth + Firestore) ----
   let db = null;
+  let auth = null;
   let cloudEnabled = false;
-  let cloudDocId = null;
+  let cloudDocId = null; // the signed-in user's uid
   let unsubscribeSnapshot = null;
   let lastPushedJSON = null;
 
@@ -584,17 +617,11 @@ const firebaseConfig = {
     return typeof firebase !== 'undefined' && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
   }
 
-  async function sha256Hex(text){
-    const enc = new TextEncoder().encode(text);
-    const buf = await crypto.subtle.digest('SHA-256', enc);
-    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
-
   function initFirebase(){
-    if(db) return db;
+    if(db && auth) return;
     if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-    return db;
+    auth = firebase.auth();
   }
 
   function setSyncStatus(msg, isErr){
@@ -604,11 +631,11 @@ const firebaseConfig = {
     el.classList.toggle('err', !!isErr);
   }
 
-  function setSyncBadge(connected){
-    document.getElementById('syncBadge').style.display = connected ? 'inline-block' : 'none';
-    document.getElementById('syncConnectBtn').style.display = connected ? 'none' : 'inline-block';
-    document.getElementById('syncDisconnectBtn').style.display = connected ? 'inline-block' : 'none';
-    document.getElementById('syncCodeInput').disabled = connected;
+  function setAuthUI(user){
+    document.getElementById('syncBadge').style.display = user ? 'inline-block' : 'none';
+    document.getElementById('authForm').style.display = user ? 'none' : 'block';
+    document.getElementById('signedInView').style.display = user ? 'block' : 'none';
+    if(user) document.getElementById('signedInEmail').textContent = user.email;
   }
 
   function applyRemoteState(data){
@@ -648,54 +675,97 @@ const firebaseConfig = {
     catch(e){ console.error('cloud push failed', e); setSyncStatus("Couldn't save to the cloud — check your connection.", true); }
   }
 
-  async function connectCloudSync(code, isAutoReconnect){
-    if(!firebaseConfigured()){
-      setSyncStatus("Add your Firebase config in the code first — see the setup notes.", true);
-      return;
-    }
-    initFirebase();
+  async function onSignedIn(user){
+    cloudDocId = user.uid;
+    cloudEnabled = true;
+    setAuthUI(user);
     setSyncStatus("Connecting…");
     try{
-      const docId = isAutoReconnect ? code : await sha256Hex(code);
-      cloudDocId = docId;
-      cloudEnabled = true;
-      await storageSet('cloudDocId', docId);
-      const snap = await db.collection('ledgers').doc(docId).get();
+      const snap = await db.collection('ledgers').doc(cloudDocId).get();
       if(snap.exists){
         applyRemoteState(snap.data());
-        setSyncStatus("Connected — loaded your synced data.");
+        setSyncStatus("Signed in — loaded your synced data.");
       } else {
         await pushToCloud();
-        setSyncStatus("Connected — this device is now synced to the cloud.");
+        setSyncStatus("Signed in — this device is now synced to your account.");
       }
       listenForRemoteChanges();
-      setSyncBadge(true);
     }catch(e){
       console.error(e);
-      setSyncStatus("Couldn't connect. Check your Firebase config and Firestore rules.", true);
-      cloudEnabled = false;
-      setSyncBadge(false);
+      setSyncStatus("Signed in, but couldn't reach the database — check your Firestore rules.", true);
     }
   }
 
-  async function disconnectCloudSync(){
+  function onSignedOut(){
     if(unsubscribeSnapshot) unsubscribeSnapshot();
     cloudEnabled = false;
     cloudDocId = null;
-    await storageSet('cloudDocId', '');
-    document.getElementById('syncCodeInput').value = '';
-    setSyncBadge(false);
-    setSyncStatus("Disconnected — this device is now local-only.");
+    setAuthUI(null);
+    setSyncStatus("");
   }
 
-  async function autoReconnectCloudSync(){
-    if(!firebaseConfigured()) return;
+  function readAuthForm(){
+    return {
+      email: document.getElementById('authEmail').value.trim(),
+      password: document.getElementById('authPassword').value
+    };
+  }
+
+  function friendlyAuthError(e){
+    const map = {
+      'auth/invalid-email': "That email address doesn't look right.",
+      'auth/user-not-found': "No account with that email — try Create account instead.",
+      'auth/wrong-password': "Incorrect password.",
+      'auth/email-already-in-use': "An account already exists with that email — try Sign in instead.",
+      'auth/weak-password': "Password should be at least 6 characters.",
+      'auth/invalid-credential': "Email or password is incorrect."
+    };
+    return map[e.code] || e.message;
+  }
+
+  async function signUp(){
+    if(!firebaseConfigured()){ setSyncStatus("Add your Firebase config in the code first — see the setup notes.", true); return; }
+    initFirebase();
+    const {email, password} = readAuthForm();
+    if(!email || !password){ setSyncStatus("Enter an email and password.", true); return; }
+    setSyncStatus("Creating account…");
+    try{ await auth.createUserWithEmailAndPassword(email, password); }
+    catch(e){ setSyncStatus(friendlyAuthError(e), true); }
+  }
+
+  async function signIn(){
+    if(!firebaseConfigured()){ setSyncStatus("Add your Firebase config in the code first — see the setup notes.", true); return; }
+    initFirebase();
+    const {email, password} = readAuthForm();
+    if(!email || !password){ setSyncStatus("Enter an email and password.", true); return; }
+    setSyncStatus("Signing in…");
+    try{ await auth.signInWithEmailAndPassword(email, password); }
+    catch(e){ setSyncStatus(friendlyAuthError(e), true); }
+  }
+
+  async function signOutUser(){
+    try{ await auth.signOut(); }
+    catch(e){ console.error(e); }
+  }
+
+  async function forgotPassword(){
+    if(!firebaseConfigured()){ setSyncStatus("Add your Firebase config in the code first — see the setup notes.", true); return; }
+    initFirebase();
+    const email = document.getElementById('authEmail').value.trim();
+    if(!email){ setSyncStatus("Enter your email above first, then click this again.", true); return; }
     try{
-      const saved = await storageGet('cloudDocId');
-      if(saved && saved.value){
-        await connectCloudSync(saved.value, true);
-      }
-    }catch(e){ /* silent — stays local-only */ }
+      await auth.sendPasswordResetEmail(email);
+      setSyncStatus("Password reset email sent — check your inbox.");
+    }catch(e){ setSyncStatus(friendlyAuthError(e), true); }
+  }
+
+  function initAuthListener(){
+    if(!firebaseConfigured()) return;
+    initFirebase();
+    auth.onAuthStateChanged(user=>{
+      if(user) onSignedIn(user);
+      else onSignedOut();
+    });
   }
 
   let transactions = [];
@@ -1071,20 +1141,17 @@ const firebaseConfig = {
   document.getElementById('amountInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
   document.getElementById('descInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addEntry(); });
   document.getElementById('accNameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addAccount(); });
-  document.getElementById('syncConnectBtn').addEventListener('click', ()=>{
-    const code = document.getElementById('syncCodeInput').value.trim();
-    if(!code){ document.getElementById('syncCodeInput').focus(); return; }
-    connectCloudSync(code, false);
-  });
-  document.getElementById('syncDisconnectBtn').addEventListener('click', disconnectCloudSync);
-  document.getElementById('syncCodeInput').addEventListener('keydown', e=>{
-    if(e.key==='Enter') document.getElementById('syncConnectBtn').click();
-  });
+  document.getElementById('signInBtn').addEventListener('click', signIn);
+  document.getElementById('signUpBtn').addEventListener('click', signUp);
+  document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+  document.getElementById('forgotPasswordLink').addEventListener('click', forgotPassword);
+  document.getElementById('authPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 
   populateStaticSelects();
   document.getElementById('dateInput').value = todayISO();
   setType('expense');
-  loadData().then(autoReconnectCloudSync);
+  loadData();
+  initAuthListener();
 })();
 </script>
 </body>
