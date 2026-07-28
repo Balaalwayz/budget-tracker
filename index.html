@@ -32,10 +32,60 @@
     font-family:'Inter',sans-serif;
     -webkit-font-smoothing:antialiased;
   }
+  .app-shell{
+    display:flex;
+    align-items:flex-start;
+    min-height:100vh;
+  }
+  .sidebar{
+    flex:0 0 200px;
+    background:linear-gradient(180deg,var(--ledger) 0%,var(--ledger-2) 100%);
+    min-height:100vh;
+    position:sticky;
+    top:0;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    padding:26px 14px;
+  }
+  .sidebar-brand{
+    font-family:'Fraunces',serif; font-weight:600; font-size:16px; line-height:1.25;
+    color:#f1ede2; margin-bottom:18px; padding:0 10px;
+  }
+  .nav-item{
+    display:block; width:100%; text-align:left;
+    background:none; border:none; border-left:3px solid transparent;
+    color:rgba(241,237,226,0.7);
+    font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    padding:11px 12px; border-radius:0 6px 6px 0; cursor:pointer;
+  }
+  .nav-item:hover{background:rgba(241,237,226,0.08); color:#f1ede2;}
+  .nav-item.active{
+    background:rgba(241,237,226,0.12);
+    border-left-color:var(--gold-soft);
+    color:#f1ede2;
+    font-weight:600;
+  }
   .wrap{
+    flex:1;
     max-width:980px;
     margin:0 auto;
     padding:28px 20px 80px;
+    min-width:0;
+  }
+  @media (max-width:820px){
+    .app-shell{flex-direction:column;}
+    .sidebar{
+      position:relative; min-height:auto; width:100%;
+      flex-direction:row; overflow-x:auto; gap:6px; padding:14px 16px;
+    }
+    .sidebar-brand{display:none;}
+    .nav-item{
+      flex:0 0 auto; white-space:nowrap;
+      border-left:none; border-bottom:3px solid transparent;
+      border-radius:6px 6px 0 0;
+    }
+    .nav-item.active{border-left-color:transparent; border-bottom-color:var(--gold-soft);}
   }
 
   /* ---- Perforated header / passbook cover ---- */
@@ -378,8 +428,18 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-brand">Personal<br>Ledger</div>
+    <button class="nav-item active" data-page="overview">Overview</button>
+    <button class="nav-item" data-page="accounts">Accounts</button>
+    <button class="nav-item" data-page="entry">Add entry</button>
+    <button class="nav-item" data-page="register">Register</button>
+    <button class="nav-item" data-page="account">Account</button>
+  </nav>
+  <main class="wrap" id="mainContent">
 
+  <div class="page" id="page-overview">
   <div class="cover">
     <div class="cover-top">
       <div>
@@ -420,6 +480,17 @@
 
   <section>
     <div class="section-head">
+      <h2>Category budgets</h2>
+      <span class="hint">click a limit to edit</span>
+    </div>
+    <div class="budgets" id="budgetsGrid"></div>
+  </section>
+
+  </div><!-- /page-overview -->
+
+  <div class="page" id="page-accounts" style="display:none;">
+  <section>
+    <div class="section-head">
       <h2>Accounts</h2>
       <span class="hint">balances shown in each account's own currency</span>
     </div>
@@ -436,15 +507,9 @@
       <button class="add-btn" id="addAccountBtn">Add account</button>
     </div>
   </section>
+  </div><!-- /page-accounts -->
 
-  <section>
-    <div class="section-head">
-      <h2>Category budgets</h2>
-      <span class="hint">click a limit to edit</span>
-    </div>
-    <div class="budgets" id="budgetsGrid"></div>
-  </section>
-
+  <div class="page" id="page-entry" style="display:none;">
   <section>
     <div class="section-head">
       <h2>New entry</h2>
@@ -495,7 +560,9 @@
       </div>
     </div>
   </section>
+  </div><!-- /page-entry -->
 
+  <div class="page" id="page-register" style="display:none;">
   <section>
     <div class="section-head">
       <h2>Register</h2>
@@ -503,7 +570,9 @@
     </div>
     <div class="register" id="registerTable"></div>
   </section>
+  </div><!-- /page-register -->
 
+  <div class="page" id="page-account" style="display:none;">
   <section>
     <div class="section-head">
       <h2>Account <span class="sync-connected-badge" id="syncBadge" style="display:none;">Signed in</span></h2>
@@ -540,9 +609,11 @@
       <div class="sync-note">Your ledger is tied to your account, so signing in with the same email and password on any device or browser loads the same data. This needs a Firebase project connected in the code, with email/password sign-in turned on (see setup notes), before it will work.</div>
     </div>
   </section>
+  </div><!-- /page-account -->
 
   <footer>Entries are stored to your account for this app only</footer>
-</div>
+  </main>
+</div><!-- /app-shell -->
 
 <script>
 (function(){
@@ -1166,11 +1237,22 @@ const firebaseConfig = {
   document.getElementById('forgotPasswordLink').addEventListener('click', forgotPassword);
   document.getElementById('authPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 
+  function showPage(name){
+    document.querySelectorAll('.page').forEach(p=>{ p.style.display = (p.id === 'page-'+name) ? 'block' : 'none'; });
+    document.querySelectorAll('.nav-item').forEach(b=>{ b.classList.toggle('active', b.dataset.page===name); });
+    document.getElementById('mainContent').scrollTop = 0;
+    window.scrollTo(0,0);
+  }
+  document.querySelectorAll('.nav-item').forEach(btn=>{
+    btn.addEventListener('click', ()=> showPage(btn.dataset.page));
+  });
+
   populateStaticSelects();
   document.getElementById('dateInput').value = todayISO();
   setType('expense');
   loadData();
   initAuthListener();
+  showPage('overview');
 })();
 </script>
 </body>
