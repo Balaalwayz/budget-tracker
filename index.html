@@ -612,6 +612,7 @@ const firebaseConfig = {
   let cloudDocId = null; // the signed-in user's uid
   let unsubscribeSnapshot = null;
   let lastPushedJSON = null;
+  let wasSignedIn = false;
 
   function firebaseConfigured(){
     return typeof firebase !== 'undefined' && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
@@ -676,6 +677,7 @@ const firebaseConfig = {
   }
 
   async function onSignedIn(user){
+    wasSignedIn = true;
     cloudDocId = user.uid;
     cloudEnabled = true;
     setAuthUI(user);
@@ -701,7 +703,24 @@ const firebaseConfig = {
     cloudEnabled = false;
     cloudDocId = null;
     setAuthUI(null);
-    setSyncStatus("");
+
+    if(wasSignedIn){
+      // A signed-in user just signed out — clear their data from this device
+      // rather than leaving it sitting in view or in local cache.
+      transactions = [];
+      accounts = [];
+      budgets = {};
+      storageSet('transactions', JSON.stringify(transactions));
+      storageSet('accounts', JSON.stringify(accounts));
+      storageSet('budgets', JSON.stringify(budgets));
+      populateAccountSelect();
+      updateFxLabels();
+      render();
+      setSyncStatus("Signed out — this device's local copy has been cleared.");
+    } else {
+      setSyncStatus("");
+    }
+    wasSignedIn = false;
   }
 
   function readAuthForm(){
